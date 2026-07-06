@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 # Configuration (read once at import time, same as before)
 # ---------------------------------------------------------------------------
 DEVICE = os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
+
+# Device for the plain-PyTorch stages (alignment + diarization). These are
+# MPS-portable, unlike transcription which runs on CTranslate2 (CPU/CUDA only,
+# no MPS backend ever). Defaults to DEVICE for backward compatibility; on Apple
+# Silicon set TORCH_DEVICE=mps to move diarization/alignment onto Metal while
+# transcription stays on DEVICE=cpu. Run with PYTORCH_ENABLE_MPS_FALLBACK=1 so
+# the handful of pyannote ops lacking MPS kernels fall back to CPU.
+TORCH_DEVICE = os.getenv("TORCH_DEVICE", DEVICE)
+
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "float16" if DEVICE == "cuda" else "int8")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "16" if DEVICE == "cuda" else "2"))
 HF_TOKEN = os.getenv("HF_TOKEN", None)
@@ -122,10 +131,14 @@ _eviction_thread_started = False
 # ---------------------------------------------------------------------------
 def clear_gpu_memory():
     """Clear GPU memory cache to prevent VRAM buildup."""
-    if DEVICE == "cuda":
+    if DEVICE == "cuda" or TORCH_DEVICE == "cuda":
         gc.collect()
         torch.cuda.empty_cache()
         logger.debug("GPU memory cache cleared")
+    if TORCH_DEVICE == "mps":
+        gc.collect()
+        torch.mps.empty_cache()
+        logger.debug("MPS memory cache cleared")
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +227,7 @@ def load_align_model(language_code: str):
                 logger.info(f"Loading alignment model for language: {language_code}")
                 model_a, metadata = whisperx.load_align_model(
                     language_code=language_code,
-                    device=DEVICE,
+                    device=TORCH_DEVICE,
                     model_dir=CACHE_DIR,
                 )
                 _align_models[language_code] = (model_a, metadata)
@@ -232,7 +245,7 @@ def load_diarize_pipeline() -> DiarizationPipeline:
                 _diarize_pipeline = DiarizationPipeline(
                     model_name="pyannote/speaker-diarization-community-1",
                     use_auth_token=HF_TOKEN,
-                    device=torch.device(DEVICE),
+                    device=torch.device(TORCH_DEVICE),
                 )
                 logger.info("Diarization pipeline loaded")
     return _diarize_pipeline
@@ -295,7 +308,7 @@ def align(audio: np.ndarray, result: dict) -> dict:
             model_a,
             metadata,
             audio,
-            DEVICE,
+            TORCH_DEVICE,
             return_char_alignments=False,
         )
         logger.info("Timestamp alignment complete")

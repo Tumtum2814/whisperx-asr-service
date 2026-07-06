@@ -18,6 +18,7 @@ import whisperx
 from app.version import __version__
 from app.pipeline import (
     DEVICE,
+    TORCH_DEVICE,
     COMPUTE_TYPE,
     BATCH_SIZE,
     HF_TOKEN,
@@ -54,6 +55,7 @@ app = FastAPI(
 )
 
 logger.info(f"WhisperX ASR Service v{__version__} initialized on device: {DEVICE}")
+logger.info(f"Torch-stage device (align/diarize): {TORCH_DEVICE}")
 logger.info(f"Compute type: {COMPUTE_TYPE}, Batch size: {BATCH_SIZE}")
 logger.info(f"Default model: {DEFAULT_MODEL}, Serve mode: {SERVE_MODE}")
 
@@ -84,6 +86,7 @@ async def root():
         "status": "running",
         "service": "WhisperX ASR API",
         "device": DEVICE,
+        "torch_device": TORCH_DEVICE,
         "compute_type": COMPUTE_TYPE,
         "serve_mode": SERVE_MODE,
     }
