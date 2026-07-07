@@ -66,3 +66,10 @@ tmp/
 
 # Test audio files
 testfiles/
+
+# Local dev artifacts (Mac native setup)
+.cache/
+venv/
+*.mp3
+*.m4a
+result*.json
