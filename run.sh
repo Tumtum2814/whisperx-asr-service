@@ -7,7 +7,9 @@ export CACHE_DIR="$DIR/.cache"          # container default is /.cache — read-
 export HF_HOME="$DIR/.cache"            # pyannote/HF downloads land here too
 export NLTK_DATA="$DIR/.cache/nltk_data"
 export PYTHONWARNINGS="ignore::UserWarning"   # silences the cosmetic torchcodec wall
-export PRELOAD_MODEL="${PRELOAD_MODEL:-medium}"
+export PRELOAD_MODEL="${PRELOAD_MODEL:-distil-large-v3.5}"   # fastest + large-class quality (2026-07-06 bench)
+#export PRELOAD_MODEL="${PRELOAD_MODEL:-medium}"
+#export PRELOAD_MODEL="${PRELOAD_MODEL:-large-v3-turbo}"
 # Metal for the plain-PyTorch stages (align + diarize). Transcription stays on
 # DEVICE=cpu (CTranslate2 has no MPS). Diarization ~203s -> ~18s on the M4 Pro.
 # Override with TORCH_DEVICE=cpu to force the old all-CPU path.

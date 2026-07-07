@@ -30,8 +30,21 @@ connector expects, including speaker embeddings (ASR_RETURN_SPEAKER_EMBEDDINGS).
   ~4:55/3:23, a bit above the original ~4:20/3:05 — machine-load variance.)
 - DEVICE=cpu, COMPUTE_TYPE=int8, BATCH_SIZE=2 (pipeline.py auto-detects; these
   are the correct CPU values per upstream's env example).
-- PRELOAD_MODEL=medium (NOTE: this env doubles as the per-request DEFAULT
-  model, not just a warmup hint — see pipeline.py DEFAULT_MODEL).
+- PRELOAD_MODEL=distil-large-v3.5 (NOTE: this env doubles as the per-request
+  DEFAULT model, not just a warmup hint — see pipeline.py DEFAULT_MODEL).
+  Chosen by the 2026-07-06 five-model benchmark; run.sh has commented
+  one-line switches for medium and large-v3-turbo.
+- **Model benchmark 2026-07-06 (5-min clip, CPU int8 batch 2, MPS diarize —
+  transcription-stage seconds from server log, model load excluded):**
+  distil-large-v3.5 **80.9s** · distil-large-v3 82.5s · medium 88.0s ·
+  large-v3-turbo 91.9s · large-v3 132.3s. All five: same 5 speakers, same
+  diarization. Text similarity vs medium: v3.5/turbo/large-v3 ≈ 0.986-0.988
+  (agree with each other), distil-v3 0.971 (paraphrases). **Winner:
+  distil-large-v3.5 — fastest AND large-class fidelity** (3.5 fixed distil's
+  paraphrase drift). turbo is a hair better on brand names ("Pure Leaf") but
+  12% slower. large-v3 not worth +50%. NOBODY spells "Kokotajlo" — hard names
+  need Speakr's hotwords. Advertised distil/turbo speedups (2x/6x) do NOT
+  materialize on CTranslate2 int8 M4 — all land within ±10% of medium.
 - Eventually managed by supervisord (`[program:whisperx]`) alongside the other
   native services; dev copy lives in ~/Documents/claude/whisperxmac/.
 
@@ -105,11 +118,12 @@ time curl -F "audio_file=@clip.mp3" "http://localhost:9002/asr?diarize=true&outp
    identical to CPU. No op fallbacks or dtype fixes were needed (see env-facts).
    Commits on branch mps-support. Remaining upside is now Milestone 2
    (transcription on Metal via mlx-whisper) — see item 4.
-3. ~~Optional quick win: distil-large-v3~~ **TESTED 2026-07-05, REJECTED:**
-   transcription came out a few seconds SLOWER than medium on this CPU/int8
-   setup (distil's speed advantage evidently doesn't materialize under
-   CTranslate2 int8 on M4 at batch 2). **Stick with medium.** Don't re-test
-   without a changed variable (different batch size, or post-MPS).
+3. ~~Optional quick win: distil-large-v3~~ TESTED 2026-07-05 (rejected: slower
+   than medium pre-MPS), **RE-TESTED 2026-07-06 post-MPS in the five-model
+   benchmark (see Current state): superseded by distil-large-v3.5, now the
+   default.** The 07-05 "distil slower than medium" result flipped to ~6%
+   faster on re-run — it was within machine-load noise all along; the real
+   finding is that NO model's advertised speedup materializes on CT2/int8/M4.
 4. **Milestone 2 — transcription on Metal** (the hard one, now LOWER priority):
    faster-whisper runs on CTranslate2 which has NO MPS backend, ever. Only
    path is swapping the stage backend to mlx-whisper behind an env flag
