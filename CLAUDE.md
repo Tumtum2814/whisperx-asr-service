@@ -45,8 +45,14 @@ connector expects, including speaker embeddings (ASR_RETURN_SPEAKER_EMBEDDINGS).
   12% slower. large-v3 not worth +50%. NOBODY spells "Kokotajlo" — hard names
   need Speakr's hotwords. Advertised distil/turbo speedups (2x/6x) do NOT
   materialize on CTranslate2 int8 M4 — all land within ±10% of medium.
-- Eventually managed by supervisord (`[program:whisperx]`) alongside the other
-  native services; dev copy lives in ~/Documents/claude/whisperxmac/.
+- **PROMOTED TO PROD 2026-07-08:** runs under supervisord (`[program:whisperx]`,
+  port 9002) from ~/aistack/whisperx (clone of the GitHub fork, mps-support
+  branch; venv rebuilt in place via setup-venv.sh, model caches copied from
+  dev). Logs: ~/aistack/logs/whisperx.log. HF_TOKEN + PATH (needs
+  /opt/homebrew/bin for ffmpeg) live in the supervisord environment= line.
+  Verified end-to-end post-promotion: 5 speakers + 5 embeddings on the test
+  clip. Dev copy stays in ~/Documents/claude/whisperxmac/ — push there,
+  `git pull` in ~/aistack/whisperx, `supervisorctl restart whisperx`.
 
 ## Hard-won environment facts (do not rediscover these)
 - **/.cache is the container default and is READ-ONLY on macOS root.** run.sh
@@ -108,9 +114,11 @@ time curl -F "audio_file=@clip.mp3" "http://localhost:9002/asr?diarize=true&outp
 ```
 
 ## Roadmap (reordered 2026-07-05 by benchmark — diarization dominates)
-1. ~~Milestone 0: native CPU baseline~~ DONE + benchmarked. Remaining: wire
-   Speakr (ASR_BASE_URL=http://host.docker.internal:9002, ASR_DIARIZE=true,
-   ASR_RETURN_SPEAKER_EMBEDDINGS=true) and commit the working state.
+1. ~~Milestone 0: native CPU baseline~~ **FULLY DONE 2026-07-08.** Speakr wired
+   (ASR_BASE_URL=http://host.docker.internal:9002, ASR_DIARIZE=true,
+   ASR_RETURN_SPEAKER_EMBEDDINGS=true), state committed + pushed to the
+   GitHub fork, and the service promoted to prod under supervisord (see
+   Current state).
 2. ~~Milestone 1 — MPS for diarization (+alignment)~~ **DONE 2026-07-06.**
    Added TORCH_DEVICE env (defaults to DEVICE) routing align+diarize onto MPS
    while transcription stays on DEVICE=cpu. Diarization ~3:23 → ~18s (~11x),
@@ -150,9 +158,9 @@ time curl -F "audio_file=@clip.mp3" "http://localhost:9002/asr?diarize=true&outp
 - LiteLLM gateway :4000 (Docker) fronts all models; llama.cpp router :8080,
   stable-diffusion.cpp :8081, whisper.cpp+CoreML :8082 run natively under
   supervisord (config: /opt/homebrew/etc/supervisord.conf, logs:
-  ~/aistack/logs/). This service joins them at :9001 when promoted to prod
-  (~/aistack/whisperx — REBUILD the venv there, don't mv it; venvs hardcode
-  absolute paths).
+  ~/aistack/logs/). This service joined them 2026-07-08 at :9002 from
+  ~/aistack/whisperx (venv REBUILT there via setup-venv.sh, not mv'd; venvs
+  hardcode absolute paths).
 - Speakr + the rest of the Docker tier deploy via Dockhand (git-based) from
   the aimac stack; supervisord conf quirks: inline `;` comments need a
   preceding space, command= must be one physical line, PATH must include
