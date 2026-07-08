@@ -1,5 +1,5 @@
 #!/bin/bash
-DIR="$HOME/Documents/claude/whisperxmac/whisperx-asr-service"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # location-independent: dev copy and ~/aistack/whisperx both work
 cd "$DIR"
 source venv/bin/activate
 export HF_TOKEN="${HF_TOKEN:?Set HF_TOKEN (pyannote gated models)}"
