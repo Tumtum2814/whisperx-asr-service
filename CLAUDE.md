@@ -132,12 +132,20 @@ time curl -F "audio_file=@clip.mp3" "http://localhost:9002/asr?diarize=true&outp
    default.** The 07-05 "distil slower than medium" result flipped to ~6%
    faster on re-run — it was within machine-load noise all along; the real
    finding is that NO model's advertised speedup materializes on CT2/int8/M4.
-4. **Milestone 2 — transcription on Metal** (the hard one, now LOWER priority):
-   faster-whisper runs on CTranslate2 which has NO MPS backend, ever. Only
-   path is swapping the stage backend to mlx-whisper behind an env flag
-   (WHISPER_BACKEND=mlx), converting its segment output to the shape align()
-   expects. v0.3.0's shared stage functions in pipeline.py are the seam.
-   Revisit if post-Milestone-1 profile shows transcription dominating.
+4. ~~Milestone 2 — transcription on Metal~~ **DONE 2026-07-15 on branch
+   mlx-backend (dev only — prod still runs ct2 pending flip).** WHISPER_BACKEND
+   env (default ct2) routes transcribe() to mlx-whisper; _MLX_MODEL_MAP maps
+   canonical names to MLX HF repos ("/" passes through). Bench (5-min clip,
+   MLX large-v3-turbo): transcription 81s → **9.1s**, total pipeline ~96s →
+   **~25s** (~13x realtime); text sim vs CT2 turbo 0.991, same 5 speakers +
+   256-dim embeddings, clean timestamps. Turbo's advertised speedup that
+   never materialized on CT2/int8 DOES on Metal. **distil-large-v3.5 has NO
+   usable MLX conversion** (wbell7's drops ~35% of words, broken timestamps —
+   rejected in resolve_mlx_repo with a clear error). MLX quirks: no hotwords
+   param (folded into initial_prompt), no batching (BATCH_SIZE ignored),
+   model cached inside mlx_whisper keyed by repo. To flip prod: set
+   WHISPER_BACKEND=mlx in run.sh/supervisord env (PRELOAD_MODEL auto-switches
+   to large-v3-turbo).
 5. If MPS lands cleanly: PR DEVICE=mps support upstream (repo is alpha,
    15 forks — receptive stage for device patches).
 6. **Dockerize the fork (CPU, multi-arch)** for distribution/Unraid/possibly

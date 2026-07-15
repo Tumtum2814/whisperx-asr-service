@@ -19,11 +19,13 @@ from app.version import __version__
 from app.pipeline import (
     DEVICE,
     TORCH_DEVICE,
+    WHISPER_BACKEND,
     COMPUTE_TYPE,
     BATCH_SIZE,
     HF_TOKEN,
     DEFAULT_MODEL,
     load_whisper_model,
+    preload_model as preload_backend_model,
     clear_gpu_memory,
     format_timestamp,
     sanitize_float_values,
@@ -56,6 +58,7 @@ app = FastAPI(
 
 logger.info(f"WhisperX ASR Service v{__version__} initialized on device: {DEVICE}")
 logger.info(f"Torch-stage device (align/diarize): {TORCH_DEVICE}")
+logger.info(f"Whisper backend: {WHISPER_BACKEND}")
 logger.info(f"Compute type: {COMPUTE_TYPE}, Batch size: {BATCH_SIZE}")
 logger.info(f"Default model: {DEFAULT_MODEL}, Serve mode: {SERVE_MODE}")
 
@@ -73,7 +76,7 @@ async def startup_event():
     if preload_model:
         logger.info(f"Preloading model on startup: {preload_model}")
         try:
-            load_whisper_model(preload_model)
+            preload_backend_model(preload_model)
             logger.info(f"Successfully preloaded model: {preload_model}")
         except Exception as e:
             logger.error(f"Failed to preload model {preload_model}: {str(e)}")
@@ -87,6 +90,7 @@ async def root():
         "service": "WhisperX ASR API",
         "device": DEVICE,
         "torch_device": TORCH_DEVICE,
+        "whisper_backend": WHISPER_BACKEND,
         "compute_type": COMPUTE_TYPE,
         "serve_mode": SERVE_MODE,
     }

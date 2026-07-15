@@ -40,6 +40,13 @@ DEVICE = os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 TORCH_DEVICE = os.getenv("TORCH_DEVICE", DEVICE)
 
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "float16" if DEVICE == "cuda" else "int8")
+
+# Transcription backend. "ct2" = faster-whisper/CTranslate2 (the default,
+# CPU/CUDA only — CTranslate2 has no MPS backend, ever). "mlx" = mlx-whisper
+# on Apple-Silicon Metal; align/diarize are unaffected (they follow
+# TORCH_DEVICE). MLX has no batching or hotwords param: hotwords are folded
+# into initial_prompt, BATCH_SIZE is ignored.
+WHISPER_BACKEND = os.getenv("WHISPER_BACKEND", "ct2").lower()
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "16" if DEVICE == "cuda" else "2"))
 HF_TOKEN = os.getenv("HF_TOKEN", None)
 CACHE_DIR = os.getenv("CACHE_DIR", "/.cache")
@@ -139,6 +146,12 @@ def clear_gpu_memory():
         gc.collect()
         torch.mps.empty_cache()
         logger.debug("MPS memory cache cleared")
+    if WHISPER_BACKEND == "mlx":
+        try:
+            import mlx.core as mx
+            mx.clear_cache()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +265,94 @@ def load_diarize_pipeline() -> DiarizationPipeline:
 
 
 # ---------------------------------------------------------------------------
+# MLX backend (Apple-Silicon Metal transcription)
+# ---------------------------------------------------------------------------
+# Canonical faster-whisper model name -> MLX-converted HF repo. Only names
+# with a verified conversion are mapped; anything containing "/" is passed
+# through as a literal HF repo id.
+_MLX_MODEL_MAP = {
+    # NO distil-large-v3.5 entry: the only conversion (wbell7/...) drops ~35%
+    # of words with broken timestamps (benchmarked 2026-07-15). Use
+    # large-v3-turbo on this backend instead.
+    "distil-large-v3": "mlx-community/distil-whisper-large-v3",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+    "turbo": "mlx-community/whisper-large-v3-turbo",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
+    "large": "mlx-community/whisper-large-v3-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "medium.en": "mlx-community/whisper-medium.en-mlx",
+}
+
+
+def resolve_mlx_repo(model_name: str) -> str:
+    """Map a canonical model name to its MLX HF repo (or pass repo ids through)."""
+    if "/" in model_name:
+        return model_name
+    repo = _MLX_MODEL_MAP.get(model_name)
+    if repo is None:
+        raise ValueError(
+            f"No known MLX conversion for model '{model_name}'. "
+            f"Mapped names: {sorted(_MLX_MODEL_MAP)}; or pass an HF repo id."
+        )
+    return repo
+
+
+def _transcribe_mlx(
+    audio: np.ndarray,
+    model_name: str,
+    language: Optional[str],
+    task: str,
+    initial_prompt: Optional[str],
+    hotwords: Optional[str],
+) -> dict:
+    """Transcribe on Metal via mlx-whisper, returning a whisperx-shaped dict."""
+    import mlx_whisper  # deferred: only needed when WHISPER_BACKEND=mlx
+
+    repo = resolve_mlx_repo(resolve_model_name(model_name))
+
+    # mlx-whisper has no hotwords param (that's a faster-whisper feature);
+    # fold them into initial_prompt, which conditions decoding similarly.
+    prompt = initial_prompt
+    if hotwords:
+        prompt = f"{initial_prompt} {hotwords}" if initial_prompt else hotwords
+        logger.info("MLX backend: folded hotwords into initial_prompt")
+
+    logger.info(f"Starting transcription... (mlx: {repo})")
+    raw = mlx_whisper.transcribe(
+        audio,
+        path_or_hf_repo=repo,
+        language=language,
+        task=task,
+        initial_prompt=prompt,
+        word_timestamps=False,
+        verbose=None,
+    )
+
+    # Reduce to the shape whisperx.align() consumes: segments with
+    # text/start/end plus the detected language.
+    segments = [
+        {"text": s["text"], "start": s["start"], "end": s["end"]}
+        for s in raw.get("segments", [])
+        if s.get("text", "").strip()
+    ]
+    detected_language = raw.get("language") or language or "en"
+    logger.info(f"Transcription complete. Detected language: {detected_language}")
+    return {"segments": segments, "language": detected_language}
+
+
+def preload_model(model_name: str):
+    """Warm the configured transcription backend for model_name."""
+    if WHISPER_BACKEND == "mlx":
+        # mlx_whisper caches the loaded model internally (keyed by repo);
+        # a sub-second silent clip forces download + weight load now.
+        _transcribe_mlx(
+            np.zeros(16000, dtype=np.float32), model_name, "en", "transcribe", None, None
+        )
+    else:
+        load_whisper_model(model_name)
+
+
+# ---------------------------------------------------------------------------
 # Stage 1 -- Transcription
 # ---------------------------------------------------------------------------
 def transcribe(
@@ -262,7 +363,12 @@ def transcribe(
     initial_prompt: Optional[str] = None,
     hotwords: Optional[str] = None,
 ) -> dict:
-    """Run WhisperX transcription and return raw result dict."""
+    """Run transcription on the configured backend and return raw result dict."""
+    if WHISPER_BACKEND == "mlx":
+        result = _transcribe_mlx(audio, model_name, language, task, initial_prompt, hotwords)
+        clear_gpu_memory()
+        return result
+
     whisper_model = load_whisper_model(model_name)
 
     # Set per-request options on the model's transcription options.
