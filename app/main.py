@@ -26,6 +26,9 @@ from app.pipeline import (
     DEFAULT_MODEL,
     load_whisper_model,
     preload_model as preload_backend_model,
+    resolve_backend,
+    default_model_for,
+    resolve_mlx_repo,
     clear_gpu_memory,
     format_timestamp,
     sanitize_float_values,
@@ -106,7 +109,8 @@ async def transcribe_audio(
     word_timestamps: bool = Query(True),
     output_format: str = Query("json"),
     output: Optional[str] = Query(None),
-    model: str = Query(DEFAULT_MODEL),
+    model: Optional[str] = Query(None),
+    backend: Optional[str] = Query(None),
     num_speakers: Optional[int] = Query(None),
     min_speakers: Optional[int] = Query(None),
     max_speakers: Optional[int] = Query(None),
@@ -124,7 +128,10 @@ async def transcribe_audio(
         initial_prompt: Optional prompt to guide the model
         word_timestamps: Return word-level timestamps
         output_format: json, text, srt, vtt, or tsv
-        model: WhisperX model name (tiny, base, small, medium, large-v2, large-v3)
+        model: WhisperX model name (tiny, base, small, medium, large-v2, large-v3);
+            defaults per backend (ct2: PRELOAD_MODEL, mlx: MLX_DEFAULT_MODEL)
+        backend: Per-request transcription backend override: 'ct2' or 'mlx'
+            (default: the WHISPER_BACKEND env). align/diarize are unaffected.
         num_speakers: Exact number of speakers (if known, overrides min/max)
         min_speakers: Minimum number of speakers for diarization
         max_speakers: Maximum number of speakers for diarization
@@ -142,10 +149,21 @@ async def transcribe_audio(
         if output is not None:
             output_format = output
 
-        # Map OpenAI-style aliases (whisper-tiny, whisper-large-v3, whisper-1, ...)
-        # to canonical faster-whisper names so /asr accepts the same identifiers
-        # advertised by /v1/models.
-        model = resolve_model_name(model)
+        # Resolve the transcription backend (per-request override of
+        # WHISPER_BACKEND), then the model: an unnamed model defaults per
+        # backend, since the ct2 default has no MLX conversion.
+        try:
+            backend = resolve_backend(backend)
+            if not model:
+                model = default_model_for(backend)
+            # Map OpenAI-style aliases (whisper-tiny, whisper-large-v3,
+            # whisper-1, ...) to canonical faster-whisper names so /asr
+            # accepts the same identifiers advertised by /v1/models.
+            model = resolve_model_name(model)
+            if backend == "mlx":
+                resolve_mlx_repo(model)  # fail fast with 400, not 500 mid-pipeline
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # Resolve diarization toggle
         if diarize is not None or enable_diarization is not None:
@@ -195,6 +213,7 @@ async def transcribe_audio(
             min_speakers=min_speakers,
             max_speakers=max_speakers,
             return_speaker_embeddings=return_speaker_embeddings,
+            backend=backend,
         )
 
         detected_language = result.get("language", language or "en")

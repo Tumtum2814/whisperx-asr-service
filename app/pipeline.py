@@ -46,7 +46,30 @@ COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "float16" if DEVICE == "cuda" else "int
 # on Apple-Silicon Metal; align/diarize are unaffected (they follow
 # TORCH_DEVICE). MLX has no batching or hotwords param: hotwords are folded
 # into initial_prompt, BATCH_SIZE is ignored.
+# WHISPER_BACKEND is the per-process DEFAULT; /asr accepts a per-request
+# ?backend= override, so both modes coexist in one process (CT2 models live
+# on CPU, MLX on Metal — each loads lazily on first use).
 WHISPER_BACKEND = os.getenv("WHISPER_BACKEND", "ct2").lower()
+
+# Default model when a request selects the mlx backend without naming a
+# model. Kept separate from PRELOAD_MODEL/DEFAULT_MODEL because the ct2
+# default (distil-large-v3.5) has no usable MLX conversion.
+MLX_DEFAULT_MODEL = os.getenv("MLX_DEFAULT_MODEL", "large-v3-turbo")
+
+_VALID_BACKENDS = ("ct2", "mlx")
+
+
+def resolve_backend(backend: Optional[str]) -> str:
+    """Resolve a per-request backend override against the process default."""
+    b = (backend or WHISPER_BACKEND).lower()
+    if b not in _VALID_BACKENDS:
+        raise ValueError(f"Unknown whisper backend '{b}' (valid: {', '.join(_VALID_BACKENDS)})")
+    return b
+
+
+def default_model_for(backend: str) -> str:
+    """Default model when the request names none, per backend."""
+    return MLX_DEFAULT_MODEL if backend == "mlx" else DEFAULT_MODEL
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "16" if DEVICE == "cuda" else "2"))
 HF_TOKEN = os.getenv("HF_TOKEN", None)
 CACHE_DIR = os.getenv("CACHE_DIR", "/.cache")
@@ -362,9 +385,10 @@ def transcribe(
     task: str = "transcribe",
     initial_prompt: Optional[str] = None,
     hotwords: Optional[str] = None,
+    backend: Optional[str] = None,
 ) -> dict:
-    """Run transcription on the configured backend and return raw result dict."""
-    if WHISPER_BACKEND == "mlx":
+    """Run transcription on the selected backend (default: WHISPER_BACKEND)."""
+    if resolve_backend(backend) == "mlx":
         result = _transcribe_mlx(audio, model_name, language, task, initial_prompt, hotwords)
         clear_gpu_memory()
         return result
@@ -533,6 +557,7 @@ def run_pipeline(
     min_speakers: Optional[int] = None,
     max_speakers: Optional[int] = None,
     return_speaker_embeddings: bool = False,
+    backend: Optional[str] = None,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Run the full 3-stage pipeline: transcribe -> align -> diarize.
@@ -546,6 +571,7 @@ def run_pipeline(
         task=task,
         initial_prompt=initial_prompt,
         hotwords=hotwords,
+        backend=backend,
     )
 
     if word_timestamps:
