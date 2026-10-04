@@ -160,7 +160,8 @@ time curl -F "audio_file=@clip.mp3" "http://localhost:9002/asr?diarize=true&outp
    native install stays the performance artifact if Milestone 1 pays off.
 
 ## Port map (Mac) — check before binding anything
-8080 llama router · 8081 sd-server · 8082 whisper.cpp · 4000 LiteLLM ·
+8080 llama router · 8081 sd-server · 8082 whisper.cpp · 8083 kokoro TTS ·
+4000 LiteLLM ·
 5679 Open WebUI · 8000 mcpo · 9000 (old container ASR plan, retired) ·
 **9001 supervisord web UI (RESERVED)** · **9002 this service** ·
 2376 hawser · 7007 dozzle-agent · 8899 speakr
