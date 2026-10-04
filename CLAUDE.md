@@ -132,8 +132,11 @@ time curl -F "audio_file=@clip.mp3" "http://localhost:9002/asr?diarize=true&outp
    default.** The 07-05 "distil slower than medium" result flipped to ~6%
    faster on re-run — it was within machine-load noise all along; the real
    finding is that NO model's advertised speedup materializes on CT2/int8/M4.
-4. ~~Milestone 2 — transcription on Metal~~ **DONE 2026-07-15 on branch
-   mlx-backend (dev only — prod still runs ct2 pending flip).** WHISPER_BACKEND
+4. ~~Milestone 2 — transcription on Metal~~ **DONE 2026-07-15; FLIPPED TO
+   PROD 2026-10-03** (~/aistack/whisperx on branch mlx-backend,
+   WHISPER_BACKEND=mlx in the supervisord env; verified 5 spk + 5 emb,
+   ~25-32s total on the 5-min clip. Speakr repoint 9003→9002 + killing the
+   9003 dev orphan pending).** WHISPER_BACKEND
    env (default ct2) routes transcribe() to mlx-whisper; _MLX_MODEL_MAP maps
    canonical names to MLX HF repos ("/" passes through). Bench (5-min clip,
    MLX large-v3-turbo): transcription 81s → **9.1s**, total pipeline ~96s →
